@@ -6,7 +6,9 @@ import { valider } from "../../lib/validate";
 import { hacherMotDePasse, verifierMotDePasse } from "../../lib/password";
 import { authenticate } from "../../middlewares/authenticate";
 import { limiteConnexion } from "../../middlewares/rate-limit";
-import { hacherJeton } from "../../lib/tokens";
+import { envoyerEmail } from "../../lib/mailer";
+import { emailReinitialisation } from "../../lib/emails";
+import { UNE_HEURE, dansMillisecondes, genererJeton, hacherJeton } from "../../lib/tokens";
 import { ouvrirSession, revoquerToutesLesSessions, utilisateurPublic } from "./auth.service";
 
 // Ce routeur est branché sur "/auth" dans app.ts
@@ -43,6 +45,9 @@ const schemaJetonEtMotDePasse = z.object(
   },
   { error: CORPS_INVALIDE },
 );
+
+// Ce que doit contenir une demande de mot de passe oublié
+const schemaEmail = z.object({ email: z.email({ error: "L'email n'est pas valide." }) }, { error: CORPS_INVALIDE });
 
 // POST /auth/login : se connecter avec email + mot de passe
 authRouter.post("/login", limiteConnexion, async (req, res) => {
@@ -143,4 +148,59 @@ authRouter.post("/accept-invitation", async (req, res) => {
   });
 
   res.json({ message: "Compte activé. Vous pouvez maintenant vous connecter." });
+});
+
+// POST /auth/forgot-password : recevoir par email un lien pour choisir un nouveau mot de passe.
+// Répond TOUJOURS 200, que l'email existe ou non : on ne révèle pas quels emails ont un compte.
+authRouter.post("/forgot-password", async (req, res) => {
+  const { email } = valider(schemaEmail, req.body);
+
+  const utilisateur = await prisma.user.findUnique({ where: { email: email.toLowerCase() } });
+  // Seulement pour un compte actif qui a déjà un mot de passe (sinon, c'est une invitation qu'il faut)
+  if (utilisateur?.isActive && utilisateur.passwordHash) {
+    const jeton = genererJeton();
+    await prisma.$transaction([
+      // Seul le dernier lien envoyé fonctionne
+      prisma.passwordResetToken.deleteMany({ where: { userId: utilisateur.id, usedAt: null } }),
+      prisma.passwordResetToken.create({
+        data: { tokenHash: hacherJeton(jeton), userId: utilisateur.id, expiresAt: dansMillisecondes(UNE_HEURE) },
+      }),
+    ]);
+    await envoyerEmail(emailReinitialisation(utilisateur.email, jeton));
+  }
+
+  res.json({ message: "Si un compte existe avec cet email, un lien de réinitialisation vient d'être envoyé." });
+});
+
+// POST /auth/reset-password : choisir un nouveau mot de passe grâce au jeton reçu par email
+authRouter.post("/reset-password", async (req, res) => {
+  const { token, password } = valider(schemaJetonEtMotDePasse, req.body);
+
+  const demande = await prisma.passwordResetToken.findUnique({
+    where: { tokenHash: hacherJeton(token) },
+    include: { user: true },
+  });
+  if (!demande || demande.usedAt || demande.expiresAt < new Date() || !demande.user.isActive) {
+    throw new HttpError(400, "Lien de réinitialisation invalide ou expiré.");
+  }
+
+  // En une seule fois : le jeton est marqué comme utilisé, le mot de passe change,
+  // et toutes les sessions ouvertes sont fermées (il faudra se reconnecter partout)
+  const passwordHash = await hacherMotDePasse(password);
+  await prisma.$transaction(async (tx) => {
+    const { count } = await tx.passwordResetToken.updateMany({
+      where: { id: demande.id, usedAt: null },
+      data: { usedAt: new Date() },
+    });
+    if (count === 0) {
+      throw new HttpError(400, "Lien de réinitialisation invalide ou expiré.");
+    }
+    await tx.user.update({ where: { id: demande.userId }, data: { passwordHash } });
+    await tx.refreshToken.updateMany({
+      where: { userId: demande.userId, revokedAt: null },
+      data: { revokedAt: new Date() },
+    });
+  });
+
+  res.json({ message: "Mot de passe modifié. Vous pouvez vous connecter avec le nouveau mot de passe." });
 });
