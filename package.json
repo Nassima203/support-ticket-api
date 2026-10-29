@@ -47,5 +47,8 @@
     "@prisma/engines@6.19.3": true,
     "esbuild@0.28.2": true,
     "bcrypt@6.0.0": true
+  },
+  "prisma": {
+    "seed": "tsx prisma/seed.ts"
   }
 }
