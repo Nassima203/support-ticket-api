@@ -26,6 +26,19 @@ function estStatutValide(valeur: unknown): valeur is TicketStatus {
   return STATUTS_VALIDES.includes(valeur as TicketStatus);
 }
 
+// Plus grand nombre entier qu'une colonne "integer" de PostgreSQL peut contenir
+const ID_MAX = 2147483647;
+
+// Transforme le :id de l'adresse en nombre entier positif.
+// Renvoie null si ce n'est pas un numéro valide (ex. "abc", "-3", "1.5", "0").
+function lireId(texte: string): number | null {
+  // On n'accepte que des chiffres
+  if (!/^\d+$/.test(texte)) return null;
+  const id = Number(texte);
+  if (id < 1 || id > ID_MAX) return null;
+  return id;
+}
+
 // Route de test : quand on visite http://localhost:3000/, on répond un petit message
 app.get("/", (req, res) => {
   res.json({ message: "L'API fonctionne" });
@@ -75,6 +88,26 @@ app.get("/tickets", async (req, res) => {
     orderBy: { createdAt: "desc" },
   });
   res.json(tickets);
+});
+
+// GET /tickets/:id : récupérer un ticket par son numéro
+app.get("/tickets/:id", async (req, res) => {
+  // 1. On lit le numéro dans l'adresse et on vérifie qu'il est valide, sinon 400
+  const id = lireId(req.params.id);
+  if (id === null) {
+    res.status(400).json({ error: "L'identifiant doit être un entier positif." });
+    return;
+  }
+
+  // 2. On cherche le ticket dans la base
+  const ticket = await prisma.ticket.findUnique({ where: { id } });
+
+  // 3. Aucun ticket avec ce numéro : 404
+  if (!ticket) {
+    res.status(404).json({ error: "Ticket introuvable." });
+    return;
+  }
+  res.json(ticket);
 });
 
 // On démarre le serveur : il reste allumé et attend les demandes
