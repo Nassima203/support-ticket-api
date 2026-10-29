@@ -21,6 +21,12 @@ export function gestionErreurs(err: any, req: Request, res: Response, next: Next
     return;
   }
 
+  // Corps de demande trop gros (plus de 100 Ko par défaut)
+  if (err.type === "entity.too.large") {
+    res.status(413).json({ error: "Le corps de la requête est trop volumineux." });
+    return;
+  }
+
   // Erreur imprévue : on affiche le détail dans le terminal du serveur (pour nous),
   // mais on renvoie un message simple au client (sans détail technique)
   console.error(err);

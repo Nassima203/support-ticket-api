@@ -29,9 +29,6 @@ const schemaCreation = z.object(
 // Lit le :id de l'adresse et renvoie l'utilisateur correspondant (400 ou 404 sinon)
 async function trouverUtilisateur(texteId: string) {
   const id = lireId(texteId);
-  if (id === null) {
-    throw new HttpError(400, "L'identifiant doit être un entier positif.");
-  }
   const utilisateur = await prisma.user.findUnique({ where: { id } });
   if (!utilisateur) {
     throw new HttpError(404, "Utilisateur introuvable.");
