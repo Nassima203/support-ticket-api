@@ -110,6 +110,39 @@ app.get("/tickets/:id", async (req, res) => {
   res.json(ticket);
 });
 
+// PATCH /tickets/:id/status : changer le statut d'un ticket
+app.patch("/tickets/:id/status", async (req, res) => {
+  // 1. Le numéro dans l'adresse doit être valide, sinon 400
+  const id = lireId(req.params.id);
+  if (id === null) {
+    res.status(400).json({ error: "L'identifiant doit être un entier positif." });
+    return;
+  }
+
+  // 2. Le nouveau statut (dans le corps de la demande) doit être l'un des 4 autorisés, sinon 400
+  const { status } = req.body ?? {};
+  if (!estStatutValide(status)) {
+    res.status(400).json({
+      error: `Statut invalide. Valeurs possibles : ${STATUTS_VALIDES.join(", ")}.`,
+    });
+    return;
+  }
+
+  // 3. Le ticket doit exister, sinon 404
+  const existe = await prisma.ticket.findUnique({ where: { id } });
+  if (!existe) {
+    res.status(404).json({ error: "Ticket introuvable." });
+    return;
+  }
+
+  // 4. On modifie le statut (updatedAt est mis à jour automatiquement par Prisma)
+  const ticket = await prisma.ticket.update({
+    where: { id },
+    data: { status },
+  });
+  res.json(ticket);
+});
+
 // On démarre le serveur : il reste allumé et attend les demandes
 app.listen(PORT, () => {
   console.log(`Serveur démarré sur http://localhost:${PORT}`);
