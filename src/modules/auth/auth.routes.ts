@@ -3,7 +3,7 @@ import { z } from "zod";
 import { prisma } from "../../lib/prisma";
 import { HttpError } from "../../lib/http-error";
 import { valider } from "../../lib/validate";
-import { verifierMotDePasse } from "../../lib/password";
+import { hacherMotDePasse, verifierMotDePasse } from "../../lib/password";
 import { authenticate } from "../../middlewares/authenticate";
 import { limiteConnexion } from "../../middlewares/rate-limit";
 import { hacherJeton } from "../../lib/tokens";
@@ -26,6 +26,21 @@ const schemaConnexion = z.object(
 // Ce que doit contenir une demande de refresh ou de déconnexion
 const schemaRefresh = z.object(
   { refreshToken: z.string({ error: "Le champ refreshToken est obligatoire." }).min(1, { error: "Le champ refreshToken est obligatoire." }) },
+  { error: CORPS_INVALIDE },
+);
+
+// Un nouveau mot de passe : au moins 8 caractères
+const schemaMotDePasse = z
+  .string({ error: "Le mot de passe est obligatoire." })
+  .min(8, { error: "Le mot de passe doit faire au moins 8 caractères." })
+  .max(72, { error: "Le mot de passe ne doit pas dépasser 72 caractères." });
+
+// Ce que doit contenir une acceptation d'invitation ou une réinitialisation
+const schemaJetonEtMotDePasse = z.object(
+  {
+    token: z.string({ error: "Le champ token est obligatoire." }).min(1, { error: "Le champ token est obligatoire." }),
+    password: schemaMotDePasse,
+  },
   { error: CORPS_INVALIDE },
 );
 
@@ -98,4 +113,34 @@ authRouter.post("/logout", async (req, res) => {
   });
   // 204 : c'est fait, rien à renvoyer (même réponse si le token était inconnu)
   res.status(204).send();
+});
+
+// POST /auth/accept-invitation : choisir son mot de passe grâce au jeton reçu par email
+authRouter.post("/accept-invitation", async (req, res) => {
+  const { token, password } = valider(schemaJetonEtMotDePasse, req.body);
+
+  // Jeton inconnu, déjà utilisé ou expiré : même réponse 400
+  const invitation = await prisma.invitation.findUnique({
+    where: { tokenHash: hacherJeton(token) },
+    include: { user: true },
+  });
+  if (!invitation || invitation.usedAt || invitation.expiresAt < new Date() || !invitation.user.isActive) {
+    throw new HttpError(400, "Invitation invalide ou expirée.");
+  }
+
+  // On marque l'invitation comme utilisée ET on enregistre le mot de passe, en une seule fois.
+  // Le "where usedAt: null" garantit qu'une invitation ne peut servir qu'une fois.
+  const passwordHash = await hacherMotDePasse(password);
+  await prisma.$transaction(async (tx) => {
+    const { count } = await tx.invitation.updateMany({
+      where: { id: invitation.id, usedAt: null },
+      data: { usedAt: new Date() },
+    });
+    if (count === 0) {
+      throw new HttpError(400, "Invitation invalide ou expirée.");
+    }
+    await tx.user.update({ where: { id: invitation.userId }, data: { passwordHash } });
+  });
+
+  res.json({ message: "Compte activé. Vous pouvez maintenant vous connecter." });
 });

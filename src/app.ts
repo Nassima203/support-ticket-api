@@ -2,6 +2,7 @@ import express from "express";
 import { gestionErreurs, routeIntrouvable } from "./middlewares/errors";
 import { authRouter } from "./modules/auth/auth.routes";
 import { ticketsRouter } from "./modules/tickets/tickets.routes";
+import { usersRouter } from "./modules/users/users.routes";
 
 // Ce fichier assemble l'application. L'ordre des app.use() compte :
 // Express essaie chaque élément de haut en bas.
@@ -18,6 +19,7 @@ app.get("/", (req, res) => {
 // 3. Les routes de chaque module
 app.use("/auth", authRouter);
 app.use("/tickets", ticketsRouter);
+app.use("/users", usersRouter);
 
 // 4. Aucune route n'a répondu : 404
 app.use(routeIntrouvable);
