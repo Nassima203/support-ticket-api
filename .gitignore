@@ -147,3 +147,7 @@ vite.config.ts.timestamp-*
 
 # Turbo Repo
 .turbo
+
+# Réglages personnels (Claude Code et éditeur VS Code)
+.claude/settings.local.json
+.vscode/
