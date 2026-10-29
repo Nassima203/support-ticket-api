@@ -1,4 +1,4 @@
-import express from "express";
+import express, { NextFunction, Request, Response } from "express";
 import { PrismaClient, TicketStatus } from "@prisma/client";
 
 // On crée l'application Express
@@ -141,6 +141,28 @@ app.patch("/tickets/:id/status", async (req, res) => {
     data: { status },
   });
   res.json(ticket);
+});
+
+// ---------- Gestion des erreurs (toujours après les routes) ----------
+
+// Aucune route n'a répondu : l'adresse demandée n'existe pas
+app.use((req: Request, res: Response) => {
+  res.status(404).json({ error: "Route introuvable." });
+});
+
+// Middleware d'erreur final : il a 4 paramètres, c'est ce qui le distingue pour Express.
+// Avec Express 5, les erreurs des routes async arrivent ici automatiquement.
+app.use((err: any, req: Request, res: Response, next: NextFunction) => {
+  // Corps de demande qui n'est pas du JSON valide (erreur levée par express.json())
+  if (err.type === "entity.parse.failed") {
+    res.status(400).json({ error: "Le corps de la requête n'est pas un JSON valide." });
+    return;
+  }
+
+  // Erreur imprévue : on affiche le détail dans le terminal du serveur (pour nous),
+  // mais on renvoie un message simple au client (sans détail technique)
+  console.error(err);
+  res.status(500).json({ error: "Erreur interne du serveur." });
 });
 
 // On démarre le serveur : il reste allumé et attend les demandes
