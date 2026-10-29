@@ -1,4 +1,5 @@
 import { Request, Response, Router } from "express";
+import { Role } from "@prisma/client";
 import { z } from "zod";
 import { prisma } from "../../lib/prisma";
 import { HttpError } from "../../lib/http-error";
@@ -6,7 +7,7 @@ import { valider } from "../../lib/validate";
 import { lireId } from "../../lib/validation";
 import { authenticate } from "../../middlewares/authenticate";
 import { authorize } from "../../middlewares/authorize";
-import { utilisateurPublic } from "../auth/auth.service";
+import { revoquerToutesLesSessions, utilisateurPublic } from "../auth/auth.service";
 import { envoyerInvitation, peutGerer } from "./users.service";
 
 // Ce routeur est branché sur "/users" dans app.ts
@@ -36,6 +37,17 @@ async function trouverUtilisateur(texteId: string) {
     throw new HttpError(404, "Utilisateur introuvable.");
   }
   return utilisateur;
+}
+
+// Vérifie que la personne connectée peut activer ou désactiver ce compte
+function verifierDroitsActivation(req: Request, utilisateur: { id: number; role: Role }) {
+  if (utilisateur.id === req.user!.id) {
+    throw new HttpError(403, "Vous ne pouvez pas modifier l'état de votre propre compte.");
+  }
+  // Personne ne touche au Super Admin ; un Admin ne touche pas aux Admins
+  if (!peutGerer(req.user!.role, utilisateur.role)) {
+    throw new HttpError(403, "Accès refusé : vous ne pouvez pas gérer ce compte.");
+  }
 }
 
 // POST /users : créer un compte et envoyer l'invitation par email
@@ -79,4 +91,23 @@ usersRouter.post("/:id/resend-invitation", async (req: Request<{ id: string }>, 
 
   await envoyerInvitation(utilisateur);
   res.json({ message: "Invitation renvoyée." });
+});
+
+// PATCH /users/:id/disable : désactiver un compte (connexion refusée, sessions fermées)
+usersRouter.patch("/:id/disable", async (req: Request<{ id: string }>, res: Response) => {
+  const utilisateur = await trouverUtilisateur(req.params.id);
+  verifierDroitsActivation(req, utilisateur);
+
+  const misAJour = await prisma.user.update({ where: { id: utilisateur.id }, data: { isActive: false } });
+  await revoquerToutesLesSessions(utilisateur.id);
+  res.json(utilisateurPublic(misAJour));
+});
+
+// PATCH /users/:id/enable : réactiver un compte
+usersRouter.patch("/:id/enable", async (req: Request<{ id: string }>, res: Response) => {
+  const utilisateur = await trouverUtilisateur(req.params.id);
+  verifierDroitsActivation(req, utilisateur);
+
+  const misAJour = await prisma.user.update({ where: { id: utilisateur.id }, data: { isActive: true } });
+  res.json(utilisateurPublic(misAJour));
 });
