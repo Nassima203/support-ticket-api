@@ -9,11 +9,12 @@ export const ticketsRouter = Router();
 // POST /tickets : créer un ticket
 ticketsRouter.post("/", async (req, res) => {
   // 1. On lit les informations envoyées dans le corps de la demande
-  const { title, description, authorEmail } = req.body ?? {};
+  // (provisoire : authorId sera remplacé par l'utilisateur connecté à l'étape 17)
+  const { title, description, authorId } = req.body ?? {};
 
   // 2. On vérifie qu'elles sont bien remplies, sinon erreur 400
-  if (!estTexteNonVide(title) || !estTexteNonVide(description) || !estTexteNonVide(authorEmail)) {
-    res.status(400).json({ error: "Les champs title, description et authorEmail sont obligatoires." });
+  if (!estTexteNonVide(title) || !estTexteNonVide(description) || !Number.isInteger(authorId)) {
+    res.status(400).json({ error: "Les champs title, description et authorId sont obligatoires." });
     return;
   }
   if (title.length > 150) {
@@ -23,7 +24,7 @@ ticketsRouter.post("/", async (req, res) => {
 
   // 3. On enregistre le ticket dans la base (le statut sera OPEN par défaut)
   const ticket = await prisma.ticket.create({
-    data: { title, description, authorEmail },
+    data: { title, description, authorId },
   });
 
   // 201 = "créé" : on renvoie le ticket enregistré, avec son id
